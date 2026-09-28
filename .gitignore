@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.env
+venv/
+
+# Le dossier de données (600 Mo) ne va jamais dans Git : voir README.md
+# pour la méthode de déploiement via une release GitHub + volume Railway.
+Exercices_Bac_Maths/
+*.zip
+
+# État persistant généré par le bot (recréé automatiquement)
+active_sessions.json
+signalements.json
+menu_state.json
