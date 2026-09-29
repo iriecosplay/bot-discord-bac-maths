@@ -10,28 +10,37 @@ from PIL import Image, ImageOps
 # CONFIGURATION
 # ==========================================
 #
-# v3 — CE QUI CHANGE PAR RAPPORT À LA v2 :
+# v4 — CE QUI CHANGE PAR RAPPORT À LA v3 :
 #
-# Le bot Discord a besoin de pouvoir paginer un exercice page par page
-# (bouton "page suivante"/"page précédente"). L'ancienne version collait
-# toutes les pages d'un exercice en UNE SEULE grande image verticale
-# (render_exercise). Ce n'est plus le cas : render_exercise_pages()
-# renvoie maintenant la liste des images (une par page réellement
-# occupée par l'exercice), et chaque page est enregistrée séparément
-# (enonce_1.png, enonce_2.png, ... / corrige_1.png, corrige_2.png, ...).
-# Le nombre de pages est noté dans infos.json (nb_pages_enonce,
-# nb_pages_corrige) pour que le bot sache combien de boutons afficher.
+# Ne sauvegarder QUE la partie utile de l'exercice. Avant, l'image
+# contenait aussi : les pieds de page ("Polynésie  10  13 mars 2023"),
+# les en-têtes ("Baccalauréat Spécialité : l'intégrale 2023 - A.P.M.E.P."
+# + trait), de grands blancs en bas de page, et parfois le titre du
+# sujet SUIVANT ("Baccalauréat Centres étrangers ... Sujet 2 ...").
 #
-# ATTENTION : les exercices déjà classés avec la v2 (image unique
-# enonce.png/corrige.png) NE SONT PAS reconvertis automatiquement — le
-# script saute tout dossier où infos.json existe déjà. Pour les
-# regénérer en version paginée, supprime leur dossier (ou tout le
-# dossier Exercices_Bac_Maths) avant de relancer.
+# Maintenant, pour chaque page, on détecte (analyser_page) :
+#   - l'en-tête courant  -> on démarre juste en dessous ;
+#   - le pied de page    -> on s'arrête juste au-dessus ;
+#   - le bandeau de titre d'un nouveau sujet -> on coupe avant lui, et
+#     une page qui ne contient QUE ce bandeau est ignorée.
+# Les bandes utiles de chaque page sont ensuite recollées en une seule
+# image continue (sans blancs inutiles). Cette image n'est découpée en
+# plusieurs morceaux QUE si elle est trop allongée par rapport à sa
+# largeur (ratio > RATIO_HAUTEUR_MAX) : chaque morceau reste alors proche
+# du carré, zoomé, pour rester lisible sur Discord sans avoir à cliquer
+# pour agrandir. La coupure se fait toujours dans un espace blanc entre
+# deux lignes, jamais au milieu d'une ligne de texte ou d'un tableau.
+# Le rendu est fait à un zoom plus élevé (x4 au lieu de x3) pour un texte
+# net une fois affiché en petit dans Discord.
 #
-# Le reste (score pondéré par rareté du mot, stemming, bonus de
-# cooccurrence, vérification par dominance, journal d'audit, détection
-# des exercices, gestion des années/index, regroupement en gros
-# dossiers) est inchangé par rapport à la v2.
+# Les fichiers restent nommés enonce_1.png, enonce_2.png, ... /
+# corrige_1.png, ... et infos.json contient toujours nb_pages_enonce /
+# nb_pages_corrige : le bot Discord n'a PAS besoin d'être modifié.
+#
+# ATTENTION : les exercices déjà générés ne sont pas retraités (le
+# script saute tout dossier où infos.json existe déjà). Supprime le
+# dossier Exercices_Bac_Maths avant de relancer, puis re-zippe et
+# ré-uploade le zip dans la Release GitHub.
 
 # 1. Tes fichiers PDF locaux
 CHEMINS_PDF = [
@@ -390,6 +399,24 @@ TAILLE_FENETRE_COOCCURRENCE = 8
 
 NOM_FICHIER_RAPPORT = "rapport_classification.jsonl"
 
+# --- Rendu des images (v4) ---
+# Ratio hauteur/largeur maximal d'un morceau d'image envoyé sur Discord.
+# Un morceau ne dépasse jamais RATIO_HAUTEUR_MAX fois sa propre largeur
+# -> des morceaux proches du carré, zoomés, lisibles sans avoir à cliquer
+# pour agrandir, plutôt qu'une longue bande verticale étroite. La coupure
+# ne se fait QUE si le morceau dépasse cette limite.
+RATIO_HAUTEUR_MAX = 1.4
+MARGE_PX = 15                 # marge blanche gardée autour du contenu
+ECART_ENTRE_PAGES_PX = 12     # petit espace entre deux pages recollées
+HAUTEUR_MIN_ZONE_PT = 20      # zone utile plus petite (en points PDF) = ignorée
+HAUTEUR_MIN_BANDE_PX = 30     # bande rendue plus petite (en pixels) = ignorée
+
+RE_ENTETE_PAGE = re.compile(r"(?i)a\.?\s*p\.?\s*m\.?\s*e\.?\s*p|l.int[eé]grale\s*20\d{2}")
+RE_TITRE_SUJET = re.compile(r"(?i)baccalaur[eé]at.*20\d{2}")
+RE_EPREUVE = re.compile(r"(?i)[eé]preuve\s+d.enseignement")
+RE_DATE = re.compile(r"(?i)^\s*\d{1,2}(er)?\s+(janvier|f[eé]vrier|mars|avril|mai|juin|juillet|ao[uû]t|septembre|octobre|novembre|d[eé]cembre)\s+20\d{2}\s*$")
+RE_NUM_PAGE = re.compile(r"^\s*\d{1,3}\s*$")
+
 
 # ==========================================
 # FONCTIONS UTILITAIRES (PDF / images)
@@ -520,36 +547,174 @@ def trouver_corrige_correspondant(exo_id_enonce, exos_corrige):
 
     return None
 
-def render_exercise_pages(doc, exo_info, matrix):
-    """Renvoie la LISTE des images (une par page réellement occupée par
-    l'exercice), sans les recoller. Nécessaire pour la pagination du bot
-    Discord (v2 les recollait en une seule grande image)."""
-    images = []
+def _lignes_page(page):
+    """Liste (texte, y_haut, y_bas) de toutes les lignes de texte de la page."""
+    lignes = []
+    for b in page.get_text("dict")["blocks"]:
+        if b.get("type") != 0:
+            continue
+        for l in b.get("lines", []):
+            texte = "".join(s.get("text", "") for s in l.get("spans", [])).strip()
+            if texte:
+                _, y0, _, y1 = l["bbox"]
+                lignes.append((texte, y0, y1))
+    return lignes
+
+def analyser_page(page):
+    """Repère, sur une page, les zones NON utiles :
+    - header_bottom : y sous l'en-tête courant (A.P.M.E.P. + trait), 0 si absent
+    - footer_top    : y du pied de page (région / n° de page / date), hauteur de page si absent
+    - title_top     : y du bandeau de titre d'un nouveau sujet, None si absent"""
+    h = page.rect.height
+    w = page.rect.width
+    lignes = _lignes_page(page)
+
+    # --- En-tête courant (en haut de page) ---
+    header_bottom = 0.0
+    entetes = [y1 for t, y0, y1 in lignes if y1 < 0.14 * h and RE_ENTETE_PAGE.search(t)]
+    if entetes:
+        header_bottom = max(entetes) + 2
+        try:
+            for d in page.get_drawings():
+                r = d["rect"]
+                if r.height <= 3 and r.width >= 0.5 * w and header_bottom - 4 <= r.y0 <= header_bottom + 18:
+                    header_bottom = max(header_bottom, r.y1 + 2)
+        except Exception:
+            pass
+
+    # --- Pied de page : une ligne contenant le n° de page, accompagnée
+    #     d'une date, d'un nom de région, ou d'au moins 2 autres éléments
+    #     sur la même ligne de base ---
+    footer_top = h
+    zone = [(t, y0) for t, y0, _ in lignes if y0 > 0.86 * h]
+    for t, y0 in zone:
+        if RE_NUM_PAGE.match(t):
+            meme_ligne = [(tt, yy) for tt, yy in zone if abs(yy - y0) <= 6]
+            confirme = any(RE_DATE.match(tt) or tt.strip().lower() in REGIONS for tt, _ in meme_ligne)
+            if confirme or len(meme_ligne) >= 3:
+                footer_top = min(footer_top, min(yy for _, yy in meme_ligne) - 3)
+
+    # --- Bandeau de titre d'un nouveau sujet ---
+    titres = [
+        y0 for t, y0, _ in lignes
+        if (RE_TITRE_SUJET.search(t) and not RE_ENTETE_PAGE.search(t)) or RE_EPREUVE.search(t)
+    ]
+    title_top = min(titres) if titres else None
+
+    return {"header_bottom": header_bottom, "footer_top": footer_top, "title_top": title_top}
+
+def zone_utile_page(page, p_idx, exo_info):
+    """Intervalle vertical (y0, y1), en points PDF, de la partie utile de
+    l'exercice sur cette page."""
+    info = analyser_page(page)
+    y0 = info["header_bottom"]
+    y1 = info["footer_top"]
+
+    if p_idx == exo_info["start_page"]:
+        y0 = max(y0, exo_info["start_y"])
+    elif info["title_top"] is not None:
+        # Sur une page qui n'est pas celle de départ, un bandeau de titre
+        # signifie que ce qui suit appartient au sujet suivant.
+        y1 = min(y1, info["title_top"] - 4)
+
+    if p_idx == exo_info["end_page"]:
+        y1 = min(y1, exo_info["end_y"])
+
+    return y0, y1
+
+def rogner_vertical(img, marge=MARGE_PX):
+    """Retire le blanc en haut et en bas (pas sur les côtés, pour que
+    toutes les bandes gardent la même largeur avant recollage)."""
+    bbox = ImageOps.invert(img.convert("L")).getbbox()
+    if not bbox:
+        return None
+    haut = max(0, bbox[1] - marge)
+    bas = min(img.height, bbox[3] + marge)
+    return img.crop((0, haut, img.width, bas))
+
+def _trouver_coupure(masque, y_min, y_max):
+    """Milieu de la plus grande bande de lignes entièrement blanches entre
+    y_min et y_max ; y_max si aucune bande blanche n'existe."""
+    largeur = masque.width
+    meilleur_debut, meilleure_longueur = None, 0
+    debut = None
+    for y in range(y_min, y_max + 1):
+        vide = y == y_max + 1 or masque.crop((0, y, largeur, y + 1)).getbbox() is None
+        if vide and debut is None:
+            debut = y
+        elif not vide and debut is not None:
+            if y - debut > meilleure_longueur:
+                meilleur_debut, meilleure_longueur = debut, y - debut
+            debut = None
+    if debut is not None and (y_max + 1 - debut) > meilleure_longueur:
+        meilleur_debut, meilleure_longueur = debut, y_max + 1 - debut
+    if meilleur_debut is None or meilleure_longueur < 4:
+        return y_max
+    return meilleur_debut + meilleure_longueur // 2
+
+def decouper_en_morceaux(img, ratio_hauteur_max=RATIO_HAUTEUR_MAX):
+    """Si l'image est plus haute que ratio_hauteur_max fois sa largeur
+    (donc trop allongée pour rester lisible en un coup d'œil), la
+    découpe en morceaux proches du carré, en coupant dans un espace
+    blanc entre deux lignes. Ne coupe QUE si c'est nécessaire."""
+    hauteur_max = int(img.width * ratio_hauteur_max)
+    if img.height <= hauteur_max:
+        return [img]
+
+    masque = ImageOps.invert(img.convert("L")).point(lambda p: 255 if p > 8 else 0)
+    nb_morceaux = -(-img.height // hauteur_max)  # arrondi au supérieur
+    morceaux = []
+    debut = 0
+    for i in range(nb_morceaux - 1):
+        restants = nb_morceaux - i
+        cible = debut + (img.height - debut) // restants
+        y_max = min(debut + hauteur_max, cible + hauteur_max // 10)
+        y_min = max(debut + hauteur_max // 3, cible - hauteur_max // 4)
+        coupure = _trouver_coupure(masque, y_min, max(y_min, y_max))
+        morceaux.append(img.crop((0, debut, img.width, coupure)))
+        debut = coupure
+    morceaux.append(img.crop((0, debut, img.width, img.height)))
+
+    resultat = []
+    for m in morceaux:
+        m = rogner_vertical(m)
+        if m is not None and m.height >= HAUTEUR_MIN_BANDE_PX:
+            resultat.append(m)
+    return resultat
+
+def render_exercise_pages(doc, exo_info, matrix, ratio_hauteur_max=RATIO_HAUTEUR_MAX):
+    """Renvoie la liste des images d'un exercice, en ne gardant que la
+    partie utile (sans en-têtes, pieds de page, blancs inutiles ni titre
+    du sujet suivant), recollée puis redécoupée en morceaux proches du
+    carré UNIQUEMENT si le résultat est trop allongé."""
+    bandes = []
     for p_idx in range(exo_info["start_page"], exo_info["end_page"] + 1):
         page = doc[p_idx]
-        rect = page.rect
-
-        if p_idx == exo_info["start_page"]:
-            rect.y0 = exo_info["start_y"]
-        else:
-            rect.y0 = 0
-
-        if p_idx == exo_info["end_page"]:
-            rect.y1 = exo_info["end_y"]
-        else:
-            rect.y1 = page.rect.height
-
-        if rect.y0 >= rect.y1:
+        y0, y1 = zone_utile_page(page, p_idx, exo_info)
+        if y1 - y0 < HAUTEUR_MIN_ZONE_PT:
             continue
 
+        rect = fitz.Rect(0, y0, page.rect.width, y1)
         pix = page.get_pixmap(matrix=matrix, clip=rect, alpha=False)
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
-        img = crop_white_margins(img)
-        if img.width > 0 and img.height > 0:
-            images.append(img)
+        img = rogner_vertical(img)
+        if img is not None and img.height >= HAUTEUR_MIN_BANDE_PX:
+            bandes.append(img)
 
-    return images
+    if not bandes:
+        return []
+
+    hauteur_totale = sum(b.height for b in bandes) + (len(bandes) - 1) * ECART_ENTRE_PAGES_PX
+    largeur_max = max(b.width for b in bandes)
+    combine = Image.new("RGB", (largeur_max, hauteur_totale), (255, 255, 255))
+    y = 0
+    for b in bandes:
+        combine.paste(b, (0, y))
+        y += b.height + ECART_ENTRE_PAGES_PX
+
+    combine = crop_white_margins(combine)  # rognage horizontal + marges
+    return decouper_en_morceaux(combine, ratio_hauteur_max)
 
 
 # ==========================================
@@ -952,7 +1117,7 @@ def process_multiple_pdfs():
 
     print(f"=== Début du traitement de {len(CHEMINS_PDF)} PDF(s) ===\n")
     os.makedirs(DOSSIER_PRINCIPAL, exist_ok=True)
-    matrix = fitz.Matrix(3, 3)
+    matrix = fitz.Matrix(4, 4)  # zoom élevé pour un texte net et lisible
 
     entrees = list(zip(CHEMINS_PDF, PAGES_INDEX))
     entrees_avec_index = [e for e in entrees if e[1] is not None]
