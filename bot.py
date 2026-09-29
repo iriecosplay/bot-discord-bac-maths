@@ -102,7 +102,14 @@ async def envoyer_exercice(salon, exercice, page):
     fichier = discord.File(chemin_image, filename="enonce.png")
     embed.set_image(url="attachment://enonce.png")
 
-    await salon.send(embed=embed, file=fichier, view=VueExercice(exercice, page))
+    vue = discord.ui.View(timeout=None)
+    vue.add_item(BoutonNavigationExercice("prev", exercice.chapitre, exercice.id, page, disabled=(page <= 1)))
+    vue.add_item(BoutonNavigationExercice("next", exercice.chapitre, exercice.id, page, disabled=(page >= exercice.nb_pages_enonce)))
+    vue.add_item(BoutonVoirCorrige(exercice.chapitre, exercice.id, disabled=(exercice.nb_pages_corrige == 0)))
+    vue.add_item(BoutonSignaler(exercice.chapitre, exercice.id))
+    vue.add_item(BoutonTerminerSession())
+
+    await salon.send(embed=embed, file=fichier, view=vue)
 
 
 async def envoyer_corrige(salon, exercice, page):
@@ -118,7 +125,12 @@ async def envoyer_corrige(salon, exercice, page):
     fichier = discord.File(chemin_image, filename="corrige.png")
     embed.set_image(url="attachment://corrige.png")
 
-    vue = VueCorrige(exercice, page) if exercice.nb_pages_corrige > 1 else None
+    vue = None
+    if exercice.nb_pages_corrige > 1:
+        vue = discord.ui.View(timeout=None)
+        vue.add_item(BoutonNavigationCorrige("prev", exercice.chapitre, exercice.id, page, disabled=(page <= 1)))
+        vue.add_item(BoutonNavigationCorrige("next", exercice.chapitre, exercice.id, page, disabled=(page >= exercice.nb_pages_corrige)))
+
     await salon.send(embed=embed, file=fichier, view=vue)
 
 
@@ -162,63 +174,126 @@ def _autorise_confirmation(interaction: discord.Interaction):
 # VUES (BOUTONS / MENUS)
 # ==========================================
 
-class VueExercice(discord.ui.View):
-    def __init__(self, exercice, page):
-        super().__init__(timeout=None)
-        self.exercice = exercice
-        self.page = page
-        self.bouton_precedent.disabled = page <= 1
-        self.bouton_suivant.disabled = page >= exercice.nb_pages_enonce
-        if exercice.nb_pages_corrige == 0:
-            self.bouton_corrige.disabled = True
-            self.bouton_corrige.label = "📖 Pas de corrigé"
+class BoutonNavigationExercice(discord.ui.DynamicItem[discord.ui.Button],
+                                template=r'exo:nav:(?P<action>prev|next):(?P<chapitre>[^|]+)\|(?P<id>[^|]+)\|(?P<page>\d+)'):
+    """Bouton page précédente/suivante d'un énoncé. Le chapitre, l'id de
+    l'exercice et la page sont encodés dans le custom_id : le bouton
+    reste donc utilisable après un redémarrage du bot, même dans un
+    salon créé avant, sans avoir besoin de mémoriser quoi que ce soit
+    côté bot."""
 
-    @discord.ui.button(label="◀️", style=discord.ButtonStyle.secondary, row=0)
-    async def bouton_precedent(self, interaction: discord.Interaction, button: discord.ui.Button):
+    def __init__(self, action, chapitre, exo_id, page, disabled=False):
+        super().__init__(discord.ui.Button(
+            label="◀️" if action == "prev" else "▶️",
+            style=discord.ButtonStyle.secondary,
+            row=0,
+            disabled=disabled,
+            custom_id=f"exo:nav:{action}:{chapitre}|{exo_id}|{page}",
+        ))
+        self.action, self.chapitre, self.exo_id, self.page = action, chapitre, exo_id, page
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["action"], match["chapitre"], match["id"], int(match["page"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        exo = index_exercices.trouver(self.chapitre, self.exo_id)
+        if exo is None:
+            await interaction.response.send_message("Cet exercice n'existe plus.", ephemeral=True)
+            return
         await interaction.response.defer()
-        await envoyer_exercice(interaction.channel, self.exercice, self.page - 1)
+        nouvelle_page = self.page - 1 if self.action == "prev" else self.page + 1
+        await envoyer_exercice(interaction.channel, exo, nouvelle_page)
 
-    @discord.ui.button(label="▶️", style=discord.ButtonStyle.secondary, row=0)
-    async def bouton_suivant(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+class BoutonNavigationCorrige(discord.ui.DynamicItem[discord.ui.Button],
+                               template=r'cor:nav:(?P<action>prev|next):(?P<chapitre>[^|]+)\|(?P<id>[^|]+)\|(?P<page>\d+)'):
+    def __init__(self, action, chapitre, exo_id, page, disabled=False):
+        super().__init__(discord.ui.Button(
+            label="◀️" if action == "prev" else "▶️",
+            style=discord.ButtonStyle.secondary,
+            disabled=disabled,
+            custom_id=f"cor:nav:{action}:{chapitre}|{exo_id}|{page}",
+        ))
+        self.action, self.chapitre, self.exo_id, self.page = action, chapitre, exo_id, page
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["action"], match["chapitre"], match["id"], int(match["page"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        exo = index_exercices.trouver(self.chapitre, self.exo_id)
+        if exo is None:
+            await interaction.response.send_message("Cet exercice n'existe plus.", ephemeral=True)
+            return
         await interaction.response.defer()
-        await envoyer_exercice(interaction.channel, self.exercice, self.page + 1)
+        nouvelle_page = self.page - 1 if self.action == "prev" else self.page + 1
+        await envoyer_corrige(interaction.channel, exo, nouvelle_page)
 
-    @discord.ui.button(label="📖 Voir le corrigé", style=discord.ButtonStyle.primary, row=1)
-    async def bouton_corrige(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+class BoutonVoirCorrige(discord.ui.DynamicItem[discord.ui.Button],
+                         template=r'exo:corrige:(?P<chapitre>[^|]+)\|(?P<id>[^|]+)'):
+    def __init__(self, chapitre, exo_id, disabled=False):
+        super().__init__(discord.ui.Button(
+            label="📖 Pas de corrigé" if disabled else "📖 Voir le corrigé",
+            style=discord.ButtonStyle.primary,
+            row=1,
+            disabled=disabled,
+            custom_id=f"exo:corrige:{chapitre}|{exo_id}",
+        ))
+        self.chapitre, self.exo_id = chapitre, exo_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["chapitre"], match["id"])
+
+    async def callback(self, interaction: discord.Interaction):
+        exo = index_exercices.trouver(self.chapitre, self.exo_id)
+        if exo is None:
+            await interaction.response.send_message("Cet exercice n'existe plus.", ephemeral=True)
+            return
         await interaction.response.defer()
-        await envoyer_corrige(interaction.channel, self.exercice, page=1)
+        await envoyer_corrige(interaction.channel, exo, page=1)
 
-    @discord.ui.button(label="⚠️ Signaler un problème", style=discord.ButtonStyle.danger, row=2)
-    async def bouton_signaler(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+class BoutonSignaler(discord.ui.DynamicItem[discord.ui.Button],
+                      template=r'exo:signaler:(?P<chapitre>[^|]+)\|(?P<id>[^|]+)'):
+    def __init__(self, chapitre, exo_id):
+        super().__init__(discord.ui.Button(
+            label="⚠️ Signaler un problème", style=discord.ButtonStyle.danger, row=2,
+            custom_id=f"exo:signaler:{chapitre}|{exo_id}",
+        ))
+        self.chapitre, self.exo_id = chapitre, exo_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["chapitre"], match["id"])
+
+    async def callback(self, interaction: discord.Interaction):
+        exo = index_exercices.trouver(self.chapitre, self.exo_id)
+        if exo is None:
+            await interaction.response.send_message("Cet exercice n'existe plus.", ephemeral=True)
+            return
         await interaction.response.send_message(
-            "Quel est le problème ?", view=VueChoixSignalement(self.exercice), ephemeral=True
+            "Quel est le problème ?", view=VueChoixSignalement(exo), ephemeral=True
         )
 
-    @discord.ui.button(label="✅ Terminer la session", style=discord.ButtonStyle.gray, row=2)
-    async def bouton_terminer(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+class BoutonTerminerSession(discord.ui.DynamicItem[discord.ui.Button], template=r'exo:terminer'):
+    def __init__(self):
+        super().__init__(discord.ui.Button(
+            label="✅ Terminer la session", style=discord.ButtonStyle.gray, row=2, custom_id="exo:terminer",
+        ))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls()
+
+    async def callback(self, interaction: discord.Interaction):
         await interaction.response.send_message("Session terminée, ce salon va être supprimé.", ephemeral=True)
         await gestion_sessions.fermer_par_channel(interaction.channel.id)
         await asyncio.sleep(3)
         await interaction.channel.delete()
-
-
-class VueCorrige(discord.ui.View):
-    def __init__(self, exercice, page):
-        super().__init__(timeout=None)
-        self.exercice = exercice
-        self.page = page
-        self.bouton_precedent.disabled = page <= 1
-        self.bouton_suivant.disabled = page >= exercice.nb_pages_corrige
-
-    @discord.ui.button(label="◀️", style=discord.ButtonStyle.secondary)
-    async def bouton_precedent(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer()
-        await envoyer_corrige(interaction.channel, self.exercice, self.page - 1)
-
-    @discord.ui.button(label="▶️", style=discord.ButtonStyle.secondary)
-    async def bouton_suivant(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer()
-        await envoyer_corrige(interaction.channel, self.exercice, self.page + 1)
 
 
 class VueChoixSignalement(discord.ui.View):
@@ -402,6 +477,10 @@ async def assurer_message_menu():
 
 @bot.event
 async def on_ready():
+    bot.add_dynamic_items(
+        BoutonNavigationExercice, BoutonNavigationCorrige,
+        BoutonVoirCorrige, BoutonSignaler, BoutonTerminerSession,
+    )
     bot.add_view(VueMenuPrincipal())
     for report_id in gestion_signalements.en_attente():
         bot.add_view(VueConfirmationSignalement(report_id))

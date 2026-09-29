@@ -404,7 +404,10 @@ NOM_FICHIER_RAPPORT = "rapport_classification.jsonl"
 # Un morceau ne dépasse jamais RATIO_HAUTEUR_MAX fois sa propre largeur
 # -> des morceaux proches du carré, zoomés, lisibles sans avoir à cliquer
 # pour agrandir, plutôt qu'une longue bande verticale étroite. La coupure
-# ne se fait QUE si le morceau dépasse cette limite.
+# ne se fait QUE si le morceau dépasse cette limite. Fonctionne bien
+# seulement parce que la largeur, elle, n'est PLUS rognée au texte (voir
+# rogner_horizontal_leger) : elle reste proche de la largeur réelle de
+# la page, donc le ratio a un sens.
 RATIO_HAUTEUR_MAX = 1.4
 MARGE_PX = 15                 # marge blanche gardée autour du contenu
 ECART_ENTRE_PAGES_PX = 12     # petit espace entre deux pages recollées
@@ -682,6 +685,16 @@ def decouper_en_morceaux(img, ratio_hauteur_max=RATIO_HAUTEUR_MAX):
             resultat.append(m)
     return resultat
 
+def rogner_horizontal_leger(img, marge=MARGE_PX):
+    """Retire seulement une petite marge fixe sur les côtés, SANS coller
+    à la largeur du texte. Contrairement à crop_white_margins (utilisée
+    pour les vieilles versions du script), on garde la largeur naturelle
+    de la page : une formule centrée qui n'utilise qu'une partie de la
+    largeur ne doit pas rendre l'image étroite et disproportionnée."""
+    if img.width <= 2 * marge:
+        return img
+    return img.crop((marge, 0, img.width - marge, img.height))
+
 def render_exercise_pages(doc, exo_info, matrix, ratio_hauteur_max=RATIO_HAUTEUR_MAX):
     """Renvoie la liste des images d'un exercice, en ne gardant que la
     partie utile (sans en-têtes, pieds de page, blancs inutiles ni titre
@@ -713,7 +726,7 @@ def render_exercise_pages(doc, exo_info, matrix, ratio_hauteur_max=RATIO_HAUTEUR
         combine.paste(b, (0, y))
         y += b.height + ECART_ENTRE_PAGES_PX
 
-    combine = crop_white_margins(combine)  # rognage horizontal + marges
+    combine = rogner_horizontal_leger(combine)  # marge fixe seulement, pas de rognage serré au texte
     return decouper_en_morceaux(combine, ratio_hauteur_max)
 
 

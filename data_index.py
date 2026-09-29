@@ -119,6 +119,15 @@ class IndexExercices:
                 return e
         return None
 
+    def trouver(self, chapitre, exo_id):
+        """Recherche compacte utilisée par les boutons persistants, qui
+        encodent (chapitre, id) plutôt que le chemin complet dans leur
+        custom_id (plus court, sous la limite de 100 caractères)."""
+        for e in self.par_chapitre.get(chapitre, []):
+            if e.id == exo_id:
+                return e
+        return None
+
     def deplacer_exercice(self, exercice, nouveau_chapitre):
         """Déplace physiquement le dossier de l'exercice vers un autre
         chapitre, met à jour infos.json puis recharge tout l'index."""
