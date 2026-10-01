@@ -69,8 +69,9 @@ async def creer_salon_session(interaction: discord.Interaction, exercice):
 
     categorie = await obtenir_ou_creer_categorie(guild)
 
+    # Masque le salon pour tout le monde sauf l'utilisateur et le bot
     overwrites = {
-        guild.default_role: discord.PermissionOverwrite(view_channel=True, send_messages=False),
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
         user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
         guild.me: discord.PermissionOverwrite(
             view_channel=True, send_messages=True, manage_channels=True, attach_files=True, embed_links=True
@@ -176,12 +177,6 @@ def _autorise_confirmation(interaction: discord.Interaction):
 
 class BoutonNavigationExercice(discord.ui.DynamicItem[discord.ui.Button],
                                 template=r'exo:nav:(?P<action>prev|next):(?P<chapitre>[^|]+)\|(?P<id>[^|]+)\|(?P<page>\d+)'):
-    """Bouton page précédente/suivante d'un énoncé. Le chapitre, l'id de
-    l'exercice et la page sont encodés dans le custom_id : le bouton
-    reste donc utilisable après un redémarrage du bot, même dans un
-    salon créé avant, sans avoir besoin de mémoriser quoi que ce soit
-    côté bot."""
-
     def __init__(self, action, chapitre, exo_id, page, disabled=False):
         super().__init__(discord.ui.Button(
             label="◀️" if action == "prev" else "▶️",
@@ -340,10 +335,6 @@ class VueSelectionNouveauChapitre(discord.ui.View):
 
 
 class VueConfirmationSignalement(discord.ui.View):
-    """Vue persistante : le custom_id de chaque bouton encode le
-    report_id, ce qui permet d'avoir plusieurs signalements en attente en
-    même temps et de les ré-enregistrer après un redémarrage du bot."""
-
     def __init__(self, report_id):
         super().__init__(timeout=None)
         self.report_id = report_id
@@ -460,7 +451,7 @@ async def assurer_message_menu():
     if message_id:
         try:
             await salon.fetch_message(message_id)
-            return  # le message existe déjà, rien à refaire
+            return
         except discord.NotFound:
             pass
 
