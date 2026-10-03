@@ -130,10 +130,20 @@ class IndexExercices:
 
     def deplacer_exercice(self, exercice, nouveau_chapitre):
         """Déplace physiquement le dossier de l'exercice vers un autre
-        chapitre, met à jour infos.json puis recharge tout l'index."""
+        chapitre, met à jour infos.json puis recharge tout l'index.
+        Si un dossier du même nom existe déjà dans le chapitre de
+        destination (même id d'exercice), ajoute un suffixe plutôt que
+        de planter (os.rename refuse d'écraser un dossier non vide)."""
         nouveau_dossier_chapitre = os.path.join(self.dossier_racine, nouveau_chapitre)
         os.makedirs(nouveau_dossier_chapitre, exist_ok=True)
+
         nouveau_chemin = os.path.join(nouveau_dossier_chapitre, exercice.id)
+        if os.path.exists(nouveau_chemin):
+            i = 2
+            while os.path.exists(os.path.join(nouveau_dossier_chapitre, f"{exercice.id}_dup{i}")):
+                i += 1
+            nouveau_chemin = os.path.join(nouveau_dossier_chapitre, f"{exercice.id}_dup{i}")
+
         os.rename(exercice.chemin, nouveau_chemin)
 
         json_path = os.path.join(nouveau_chemin, "infos.json")
