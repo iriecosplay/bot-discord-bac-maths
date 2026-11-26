@@ -67,7 +67,7 @@ class PanneauxServeurCog(commands.Cog, name="Panneaux"):
             for rid in ids.PRIVATE_ACCESS_ROLE_IDS:
                 r = guild.get_role(rid)
                 if r:
-                    ow[r] = discord.PermissionOverwrite(view_channel=True, send_messages=True, connect=True, speak=True, read_message_history=True)
+                    ow[r] = etat.perms_vocal()
             cat = await guild.create_category("Discussion Privée", overwrites=ow,
                                               position=(parent.position + 1) if parent else None,
                                               reason="[AUTO] Catégorie Discussion Privée créée automatiquement")
@@ -79,6 +79,27 @@ class PanneauxServeurCog(commands.Cog, name="Panneaux"):
             etat.private_discussions[data["textChannelId"]] = data
             if data["voiceChannelId"]:
                 etat.private_discussions[data["voiceChannelId"]] = data
+        await self._reparer_permissions_privees(guild, cat)
+
+    async def _reparer_permissions_privees(self, guild, cat):
+        """Corrige les discussions privées créées avant le correctif : on remet les
+        permissions vocales complètes (chat du vocal, whiteboard/activités, applis
+        externes…) à tous ceux qui y ont déjà accès."""
+        complet = etat.perms_vocal()
+        cibles = [cat, *cat.channels]
+        for ch in cibles:
+            for cible, ow in list(ch.overwrites.items()):
+                if cible == guild.default_role or ow.view_channel is not True:
+                    continue
+                if ow == complet:
+                    continue
+                fusion = discord.PermissionOverwrite.from_pair(*ow.pair())
+                fusion.update(**etat.PERMS_VOCAL)
+                if fusion != ow:
+                    try:
+                        await ch.set_permissions(cible, overwrite=fusion, reason="[AUTO] Correctif permissions des salons privés")
+                    except discord.HTTPException:
+                        pass
 
     # ── Salon vocal de stats ──
     def _stats_nom(self, guild):

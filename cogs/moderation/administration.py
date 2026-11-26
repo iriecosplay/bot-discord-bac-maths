@@ -98,7 +98,7 @@ class Administration(commands.Cog, name="Administration"):
         p = await ctx.reply(embed=discord.Embed(color=hexc("#f59e0b"), description="⏳ Création de la discussion privée..."))
         try:
             base = re.sub(r"[^a-z0-9]", "", leader.name.lower()) or str(leader.id)
-            acces = discord.PermissionOverwrite(view_channel=True, send_messages=True, connect=True, speak=True, read_message_history=True)
+            acces = etat.perms_vocal()
             ow = {g.default_role: discord.PermissionOverwrite(view_channel=False), g.me: acces}
             for rid in ids.PRIVATE_ACCESS_ROLE_IDS:
                 r = g.get_role(rid)
@@ -141,8 +141,7 @@ class Administration(commands.Cog, name="Administration"):
             for ch in (txt, voc):
                 if ch:
                     try:
-                        await ch.set_permissions(m, view_channel=True, send_messages=True, connect=True, speak=True,
-                                                 read_message_history=True, reason=f"[ADDPRIVATE] par {ctx.author}")
+                        await ch.set_permissions(m, overwrite=etat.perms_vocal(), reason=f"[ADDPRIVATE] par {ctx.author}")
                     except discord.HTTPException:
                         pass
             ajoutes.append(m)

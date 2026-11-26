@@ -523,3 +523,26 @@ class Modal(discord.ui.Modal):
 
     async def on_submit(self, interaction):  # traité ailleurs
         pass
+
+
+# ── Permissions complètes pour les salons vocaux créés par le bot ─────────────
+# Un salon vocal a aussi un chat textuel : sans send_messages on ne peut pas
+# écrire dedans, sans use_embedded_activities pas de whiteboard / jeux, sans
+# use_external_apps pas d'applications externes, etc.
+
+PERMS_VOCAL = dict(
+    view_channel=True, connect=True, speak=True, stream=True, use_voice_activation=True,
+    use_embedded_activities=True, use_external_apps=True, use_application_commands=True,
+    use_soundboard=True, use_external_sounds=True, set_voice_channel_status=True,
+    send_messages=True, send_voice_messages=True, read_message_history=True, add_reactions=True,
+    embed_links=True, attach_files=True, use_external_emojis=True, use_external_stickers=True,
+    send_polls=True,
+)
+
+
+def perms_vocal(**extra) -> discord.PermissionOverwrite:
+    return discord.PermissionOverwrite(**{**PERMS_VOCAL, **extra})
+
+
+# Gestion de « sa » vocale pour le créateur
+PERMS_CREATEUR = dict(move_members=True, mute_members=True, deafen_members=True, manage_messages=True)

@@ -3,6 +3,8 @@ from discord.ext import commands, tasks
 import logging
 
 from noyau.permissions import administrateur
+from noyau.etat import PERMS_CREATEUR, perms_vocal
+from noyau.ids import PRISON_ROLE_ID
 
 logger = logging.getLogger(__name__)
 
@@ -58,27 +60,15 @@ class VocalModal(discord.ui.Modal, title="Créer ta vocale"):
             )
             return
 
+        guild = interaction.guild
         overwrites = {
-            interaction.guild.default_role: discord.PermissionOverwrite(
-                view_channel=True,
-                connect=True,
-                speak=True,
-                stream=True,
-                use_voice_activation=True,
-                use_embedded_activities=True,
-            ),
-            interaction.user: discord.PermissionOverwrite(
-                view_channel=True,
-                connect=True,
-                speak=True,
-                stream=True,
-                use_voice_activation=True,
-                use_embedded_activities=True,
-                move_members=True,
-                mute_members=True,
-                deafen_members=True,
-            ),
+            guild.default_role: perms_vocal(),
+            interaction.user: perms_vocal(**PERMS_CREATEUR),
+            guild.me: perms_vocal(manage_channels=True, move_members=True),
         }
+        prison = guild.get_role(PRISON_ROLE_ID)
+        if prison:  # les membres en prison n'ont pas accès aux vocaux
+            overwrites[prison] = discord.PermissionOverwrite(view_channel=False, connect=False)
 
         name = f"🎙️ {self.channel_name.value}"
 
