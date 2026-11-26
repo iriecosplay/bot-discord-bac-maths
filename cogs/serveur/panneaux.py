@@ -4,6 +4,7 @@ visibilité, tag du serveur (rôle CM), reaction roles, salon vocal de stats,
 rôle Perm Jail, catégorie Discussion Privée, rôles du supérieur."""
 import asyncio
 import logging
+import os
 
 import discord
 from discord.ext import commands, tasks
@@ -130,6 +131,10 @@ class PanneauxServeurCog(commands.Cog, name="Panneaux"):
             self.stats_loop.start()
 
     async def _connexion_vocal(self, guild):
+        # Rester connecté en vocal coûte du CPU/réseau en continu pour un effet
+        # purement visuel : désactivé par défaut (STATS_VOCAL_CONNEXION=1 pour réactiver).
+        if os.environ.get("STATS_VOCAL_CONNEXION") != "1":
+            return
         ch = guild.get_channel(etat.stats_voice_channel_id or 0)
         if ch is None:
             return
