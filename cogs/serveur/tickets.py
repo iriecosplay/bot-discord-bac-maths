@@ -27,6 +27,30 @@ class TicketsCog(commands.Cog, name="Tickets"):
         self.bot = bot
 
     @commands.Cog.listener()
+    async def on_ready(self):
+        """Les tickets ouverts par l'ancien irie-bot ont un bouton « Fermer » qui ne
+        répond plus : on en reposte un qui marche (une seule fois par ticket)."""
+        if getattr(self, "_pret", False):
+            return
+        self._pret = True
+        for uid, cid in list(etat.open_tickets.items()):
+            ch = self.bot.get_channel(cid)
+            if ch is None:
+                continue
+            try:
+                a_bouton = False
+                async for m in ch.history(limit=50):
+                    if m.author.id == self.bot.user.id and m.components:
+                        a_bouton = True
+                        break
+                if a_bouton:
+                    continue
+                await ch.send(embed=discord.Embed(color=hexc("#5865F2"), description="🔒 Pour fermer ce ticket, clique sur le bouton ci-dessous."),
+                              view=Composants(bouton("ticket_close", "Fermer le ticket", discord.ButtonStyle.danger, "🔒")))
+            except discord.HTTPException as e:
+                logger.warning(f"[TICKETS] reprise du ticket {cid} : {e}")
+
+    @commands.Cog.listener()
     async def on_interaction(self, inter: discord.Interaction):
         cid = etat.custom_id(inter)
         if not cid or inter.guild is None:
