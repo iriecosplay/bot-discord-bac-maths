@@ -9,7 +9,7 @@ from noyau.ids import PRISON_ROLE_ID
 logger = logging.getLogger(__name__)
 
 # Salon "hub" de référence pour la catégorie
-HUB_CHANNEL_ID = 1507132699524071485
+HUB_CHANNEL_ID = 1518232838011355249  # #create-vocal
 
 # Catégorie où placer la vocale en haut
 CATEGORY_ID = 1487179769866092727

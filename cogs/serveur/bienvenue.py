@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 WELCOME_EMBED_CHANNEL_ID = 1519104109872152667
 WELCOME_IMAGE_URL = "https://i.pinimg.com/1200x/2f/ea/eb/2feaeb8d55f714f24690aea1371cf605.jpg"
 PANEL_CHANNEL_ID = 1487184792347738152
+DEFI_CHANNEL_ID = 1532704166961483967  # #defi
 
 ROLES_CHALLENGES = {
     "role_4e_3e": 1532351809891598446,
@@ -145,6 +146,9 @@ class Bienvenue(commands.Cog, name="Accueil"):
         ch = await get_chan(PANEL_CHANNEL_ID)
         if ch and await supprimer_anciens_panneaux(ch):
             await ch.send(embed=embed_guide(True), view=InfoRoleView())
+        ch = await get_chan(DEFI_CHANNEL_ID)
+        if ch and await supprimer_anciens_panneaux(ch):
+            await ch.send(embed=embed_defis(), view=InfoRoleView())
 
     @commands.hybrid_command(name="autoping", aliases=["setwelcome"],
                              description="Activer/désactiver le ping (5 s) des nouveaux membres dans un salon.", usage="[#salon]")
