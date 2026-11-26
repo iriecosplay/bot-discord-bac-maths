@@ -57,8 +57,15 @@ COMMANDES_PUBLIQUES = {"invite", "ping", "botinfo", "serverinfo", "membercount",
 
 class BotMaths(commands.Bot):
     def __init__(self):
-        intents = discord.Intents.all()  # members, presences, message_content, moderation, invites, voix…
+        # Seulement les événements utiles (moins de trafic = moins de CPU/RAM sur Railway)
+        intents = discord.Intents.all()
+        intents.typing = False                 # « X est en train d'écrire »
+        intents.dm_typing = False
+        intents.guild_scheduled_events = False
+        intents.auto_moderation = False
+        intents.emojis_and_stickers = False
         super().__init__(command_prefix=["+", "!"], intents=intents, help_command=None,
+                         max_messages=300,  # cache de messages réduit (défaut 1000)
                          case_insensitive=True, allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True))
         self.db = None            # base « mathsxp » (XP / progression)
         self._derniere_cmd: dict[int, float] = {}
