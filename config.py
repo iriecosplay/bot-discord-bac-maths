@@ -12,6 +12,14 @@ DATA_DIR = os.environ.get("DATA_DIR", "Exercices_Bac_Maths")
 # (voir setup_data.py). Laisser vide en local si le dossier existe déjà.
 DATA_ZIP_URL = os.environ.get("DATA_ZIP_URL", "")
 
+# --- MongoDB ---
+# Base de l'XP / progression (ex progressionbot) : mettre sur Railway la même
+# valeur MONGODB_URI que celle de l'ancien service progressionbot.
+# Par défaut : le cluster de l'ancien irie-bot (laissé en dur, autorisé).
+from noyau.ids import MONGO_URI_IRIE  # noqa: E402
+MONGODB_URI = os.environ.get("MONGODB_URI", MONGO_URI_IRIE)
+MONGO_DB_PROGRESSION = "mathsxp"
+
 # --- IDs Discord ---
 GUILD_ID = 1487179769236689068
 SALON_INTERFACE_ID = 1512035664961736724
